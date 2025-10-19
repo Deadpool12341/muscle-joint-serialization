@@ -1,5 +1,5 @@
 import sys
-import maya.cmds as mc
+import maya.cmds as cmds
 import logging
 
 # Maya 2023 uses PySide2
@@ -7,7 +7,7 @@ try:
     from PySide2.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                    QHBoxLayout, QGridLayout, QPushButton, QLabel,
                                    QComboBox, QGroupBox, QCheckBox, QSpinBox,
-                                   QDoubleSpinBox, QMessageBox, QScrollArea)
+                                   QDoubleSpinBox, QMessageBox, QScrollArea, QFileDialog)
     from PySide2.QtCore import Qt, Signal
     from PySide2.QtGui import QIcon, QPixmap, QFont
     PYSIDE2_AVAILABLE = True
@@ -15,7 +15,11 @@ except ImportError:
     PYSIDE2_AVAILABLE = False
     raise ImportError("PySide2 not found. Maya 2023 requires PySide2 to be available.")
 
-import muscle_template as mt
+from . import muscle_template as mt
+from . import utils
+from . import helper_bone
+from . import avg_push_joint
+from .rollBone import rollBone
 import maya.api.OpenMaya as om
 
 logger = logging.getLogger(__name__)
@@ -166,6 +170,20 @@ class MuscleRigUI(QMainWindow):
         self.stretch_spin.setSingleStep(0.1)
         options_layout.addWidget(self.stretch_spin, 1, 3)
 
+        # Twist Axis selection
+        options_layout.addWidget(QLabel("Twist Axis:"), 2, 0)
+        self.twist_axis_combo = QComboBox()
+        self.twist_axis_combo.addItems(["X (1,0,0)", "Y (0,1,0)", "Z (0,0,1)", "-X (-1,0,0)", "-Y (0,-1,0)", "-Z (0,0,-1)"])
+        self.twist_axis_combo.setCurrentText("Y (0,1,0)")
+        options_layout.addWidget(self.twist_axis_combo, 2, 1)
+
+        # Up Axis selection
+        options_layout.addWidget(QLabel("Up Axis:"), 2, 2)
+        self.up_axis_combo = QComboBox()
+        self.up_axis_combo.addItems(["X (1,0,0)", "Y (0,1,0)", "Z (0,0,1)", "-X (-1,0,0)", "-Y (0,-1,0)", "-Z (0,0,-1)"])
+        self.up_axis_combo.setCurrentText("X (1,0,0)")
+        options_layout.addWidget(self.up_axis_combo, 2, 3)
+
         parent_layout.addWidget(options_group)
 
     def setup_muscle_groups(self, parent_layout):
@@ -219,6 +237,140 @@ class MuscleRigUI(QMainWindow):
 
         parent_layout.addWidget(arm_group)
 
+        # Helper Bones section
+        helper_group = QGroupBox("Helper Bones")
+        helper_layout = QGridLayout(helper_group)
+
+        self.scapula_btn = QPushButton("Add Scapula Joints")
+        self.scapula_btn.setMinimumHeight(40)
+        self.scapula_btn.setStyleSheet("QPushButton { background-color: #00BCD4; color: white; font-weight: bold; }")
+        helper_layout.addWidget(self.scapula_btn, 0, 0)
+
+        self.mirror_scapula_btn = QPushButton("Mirror Scapula Joints")
+        self.mirror_scapula_btn.setMinimumHeight(40)
+        self.mirror_scapula_btn.setStyleSheet("QPushButton { background-color: #009688; color: white; font-weight: bold; }")
+        helper_layout.addWidget(self.mirror_scapula_btn, 0, 1)
+
+        parent_layout.addWidget(helper_group)
+
+        # Twist Joint section
+        twist_group = QGroupBox("Twist Joints")
+        twist_layout = QGridLayout(twist_group)
+
+        self.twist_joint_btn = QPushButton("Setup Twist Joint Chain")
+        self.twist_joint_btn.setMinimumHeight(40)
+        self.twist_joint_btn.setStyleSheet("QPushButton { background-color: #3F51B5; color: white; font-weight: bold; }")
+        twist_layout.addWidget(self.twist_joint_btn, 0, 0)
+
+        self.counter_twist_btn = QPushButton("Setup Counter Twist Chain")
+        self.counter_twist_btn.setMinimumHeight(40)
+        self.counter_twist_btn.setStyleSheet("QPushButton { background-color: #673AB7; color: white; font-weight: bold; }")
+        twist_layout.addWidget(self.counter_twist_btn, 0, 1)
+
+        self.non_flip_twist_btn = QPushButton("Setup Non-Flip Twist Chain")
+        self.non_flip_twist_btn.setMinimumHeight(40)
+        self.non_flip_twist_btn.setStyleSheet("QPushButton { background-color: #9C27B0; color: white; font-weight: bold; }")
+        twist_layout.addWidget(self.non_flip_twist_btn, 1, 0, 1, 2)
+
+        # Twist joint count control
+        twist_layout.addWidget(QLabel("Twist Joint Count:"), 2, 0)
+        self.twist_count_spin = QSpinBox()
+        self.twist_count_spin.setRange(1, 10)
+        self.twist_count_spin.setValue(3)
+        twist_layout.addWidget(self.twist_count_spin, 2, 1)
+
+        parent_layout.addWidget(twist_group)
+
+        # Average & Push Joints section
+        avg_push_group = QGroupBox("Average & Push Joints")
+        avg_push_layout = QGridLayout(avg_push_group)
+
+        # Buttons spanning full width
+        self.create_avg_push_btn = QPushButton("Create Average and Push Joints")
+        self.create_avg_push_btn.setMinimumHeight(45)
+        self.create_avg_push_btn.setStyleSheet("QPushButton { background-color: #FF5722; color: white; font-weight: bold; }")
+        avg_push_layout.addWidget(self.create_avg_push_btn, 0, 0, 1, 4)
+
+        self.batch_all_avg_push_btn = QPushButton("Fingers Average and Push Joints")
+        self.batch_all_avg_push_btn.setMinimumHeight(45)
+        self.batch_all_avg_push_btn.setStyleSheet("QPushButton { background-color: #E91E63; color: white; font-weight: bold; }")
+        avg_push_layout.addWidget(self.batch_all_avg_push_btn, 1, 0, 1, 4)
+
+        # Two-column layout for parameters
+        # Left column - Basic parameters
+        row = 2
+        avg_push_layout.addWidget(QLabel("Avg Weight:"), row, 0)
+        self.avg_weight_spin = QDoubleSpinBox()
+        self.avg_weight_spin.setRange(0.0, 1.0)
+        self.avg_weight_spin.setValue(0.5)
+        self.avg_weight_spin.setSingleStep(0.1)
+        avg_push_layout.addWidget(self.avg_weight_spin, row, 1)
+
+        # Right column - Twist Axis
+        avg_push_layout.addWidget(QLabel("Twist Axis:"), row, 2)
+        self.avg_twist_axis_combo = QComboBox()
+        self.avg_twist_axis_combo.addItems(["X", "Y", "Z"])
+        self.avg_twist_axis_combo.setCurrentText("Z")
+        avg_push_layout.addWidget(self.avg_twist_axis_combo, row, 3)
+
+        # Left column - Push Axis
+        row += 1
+        avg_push_layout.addWidget(QLabel("Push Axis:"), row, 0)
+        self.avg_push_axis_combo = QComboBox()
+        self.avg_push_axis_combo.addItems(["X", "Y", "Z"])
+        self.avg_push_axis_combo.setCurrentText("Y")
+        avg_push_layout.addWidget(self.avg_push_axis_combo, row, 1)
+
+        # Right column - Scale Value
+        avg_push_layout.addWidget(QLabel("Scale Value:"), row, 2)
+        self.push_scale_value_spin = QDoubleSpinBox()
+        self.push_scale_value_spin.setRange(0, 2)
+        self.push_scale_value_spin.setValue(0.2)
+        self.push_scale_value_spin.setSingleStep(0.1)
+        avg_push_layout.addWidget(self.push_scale_value_spin, row, 3)
+
+        # RemapValue parameters section
+        row += 1
+        remap_label = QLabel("Remap Value Settings")
+        remap_label.setStyleSheet("font-weight: bold; color: #FFD700; margin-top: 5px;")
+        avg_push_layout.addWidget(remap_label, row, 0, 1, 4)
+
+        # Left column - Input Min
+        row += 1
+        avg_push_layout.addWidget(QLabel("Input Min:"), row, 0)
+        self.remap_input_min_spin = QDoubleSpinBox()
+        self.remap_input_min_spin.setRange(-360, 360)
+        self.remap_input_min_spin.setValue(0.0)
+        self.remap_input_min_spin.setSingleStep(1.0)
+        avg_push_layout.addWidget(self.remap_input_min_spin, row, 1)
+
+        # Right column - Input Max
+        avg_push_layout.addWidget(QLabel("Input Max:"), row, 2)
+        self.remap_input_max_spin = QDoubleSpinBox()
+        self.remap_input_max_spin.setRange(-360, 360)
+        self.remap_input_max_spin.setValue(90.0)
+        self.remap_input_max_spin.setSingleStep(1.0)
+        avg_push_layout.addWidget(self.remap_input_max_spin, row, 3)
+
+        # Left column - Output Min
+        row += 1
+        avg_push_layout.addWidget(QLabel("Output Min:"), row, 0)
+        self.remap_output_min_spin = QDoubleSpinBox()
+        self.remap_output_min_spin.setRange(-100, 100)
+        self.remap_output_min_spin.setValue(0.0)
+        self.remap_output_min_spin.setSingleStep(0.1)
+        avg_push_layout.addWidget(self.remap_output_min_spin, row, 1)
+
+        # Right column - Output Max
+        avg_push_layout.addWidget(QLabel("Output Max:"), row, 2)
+        self.remap_output_max_spin = QDoubleSpinBox()
+        self.remap_output_max_spin.setRange(-100, 100)
+        self.remap_output_max_spin.setValue(5.0)
+        self.remap_output_max_spin.setSingleStep(0.1)
+        avg_push_layout.addWidget(self.remap_output_max_spin, row, 3)
+
+        parent_layout.addWidget(avg_push_group)
+
         # Combined options
         combined_group = QGroupBox("Batch Creation")
         combined_layout = QGridLayout(combined_group)
@@ -259,6 +411,22 @@ class MuscleRigUI(QMainWindow):
 
         parent_layout.addWidget(control_group)
 
+        # Import/Export section
+        io_group = QGroupBox("Import/Export")
+        io_layout = QHBoxLayout(io_group)
+
+        self.export_btn = QPushButton("Export to JSON")
+        self.export_btn.setMinimumHeight(35)
+        self.export_btn.setStyleSheet("QPushButton { background-color: #FF9800; color: white; }")
+        io_layout.addWidget(self.export_btn)
+
+        self.import_btn = QPushButton("Import from JSON")
+        self.import_btn.setMinimumHeight(35)
+        self.import_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; }")
+        io_layout.addWidget(self.import_btn)
+
+        parent_layout.addWidget(io_group)
+
     def connect_signals(self):
         """Connect button signals to their respective slots"""
         # Individual muscle buttons
@@ -269,6 +437,19 @@ class MuscleRigUI(QMainWindow):
         self.deltoid_btn.clicked.connect(lambda: self.create_muscle("Deltoid"))
         self.upper_arm_btn.clicked.connect(lambda: self.create_muscle("UpperArm"))
 
+        # Helper bone buttons
+        self.scapula_btn.clicked.connect(self.add_scapula_joints)
+        self.mirror_scapula_btn.clicked.connect(self.mirror_scapula_joints)
+
+        # Twist joint buttons
+        self.twist_joint_btn.clicked.connect(self.setup_twist_joint_chain)
+        self.counter_twist_btn.clicked.connect(self.setup_counter_twist_chain)
+        self.non_flip_twist_btn.clicked.connect(self.setup_non_flip_twist)
+
+        # Average & Push joint buttons
+        self.create_avg_push_btn.clicked.connect(self.create_avg_push_from_selection)
+        self.batch_all_avg_push_btn.clicked.connect(self.batch_create_all_avg_push)
+
         # Batch creation buttons
         self.create_all_btn.clicked.connect(self.create_all_muscles)
         self.create_torso_btn.clicked.connect(self.create_torso_muscles)
@@ -278,6 +459,10 @@ class MuscleRigUI(QMainWindow):
         self.finalize_btn.clicked.connect(self.finalize_all_muscles)
         self.delete_all_btn.clicked.connect(self.delete_all_muscles)
         self.refresh_btn.clicked.connect(self.refresh_ui)
+
+        # Import/Export buttons
+        self.export_btn.clicked.connect(self.export_muscles)
+        self.import_btn.clicked.connect(self.import_muscles)
 
     def get_muscle_class(self, muscle_type):
         """Get the appropriate muscle class"""
@@ -452,7 +637,7 @@ class MuscleRigUI(QMainWindow):
         for muscle_name, muscle in self.created_muscles.items():
             try:
                 # Check if muscle still exists in scene
-                if not mc.objExists(muscle.muscleOrigin):
+                if not cmds.objExists(muscle.muscleOrigin):
                     muscles_to_remove.append(muscle_name)
             except:
                 muscles_to_remove.append(muscle_name)
@@ -461,6 +646,361 @@ class MuscleRigUI(QMainWindow):
             del self.created_muscles[muscle_name]
 
         self.show_success(f"UI refreshed. Tracking {len(self.created_muscles)} muscles.")
+
+    def export_muscles(self):
+        """Export current muscles to JSON file"""
+        try:
+            # Open file dialog to select save location
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Muscles to JSON",
+                "",
+                "JSON Files (*.json);;All Files (*)"
+            )
+
+            if not file_path:
+                return
+
+            # Ensure .json extension
+            if not file_path.endswith('.json'):
+                file_path += '.json'
+
+            # Use utils export function
+            utils.exportMuscles(file_path)
+            self.show_success(f"Muscles exported successfully to:\n{file_path}")
+            logger.info(f"Exported muscles to {file_path}")
+
+        except Exception as e:
+            self.show_error(f"Error exporting muscles: {str(e)}")
+            logger.error(f"Error in export_muscles: {e}")
+
+    def import_muscles(self):
+        """Import muscles from JSON file"""
+        try:
+            # Open file dialog to select JSON file
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Import Muscles from JSON",
+                "",
+                "JSON Files (*.json);;All Files (*)"
+            )
+
+            if not file_path:
+                return
+
+            # Confirm import
+            reply = QMessageBox.question(
+                self, "Confirm Import",
+                "This will create muscles based on the JSON file. Continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply == QMessageBox.No:
+                return
+
+            # Use utils generate function
+            utils.generateMusclesFromFile(file_path)
+            self.show_success(f"Muscles imported successfully from:\n{file_path}")
+            logger.info(f"Imported muscles from {file_path}")
+
+            # Refresh UI to track imported muscles
+            self.refresh_ui()
+
+        except Exception as e:
+            self.show_error(f"Error importing muscles: {str(e)}")
+            logger.error(f"Error in import_muscles: {e}")
+
+    def create_avg_push_from_selection(self):
+        """Create both average and push joints from selected joint(s)"""
+        try:
+            # Get current selection
+            selection = cmds.ls(selection=True, type='joint')
+
+            # Validate selection - now we only need 1 joint (target), driver will be auto-detected
+            if len(selection) == 0:
+                self.show_error("Please select at least 1 joint (target joint).\nDriver joint will be auto-detected as parent.")
+                return
+            elif len(selection) > 2:
+                self.show_error("Please select 1 or 2 joints:\n1. Target joint (required)\n2. Driver joint (optional, will use parent if not specified)")
+                return
+
+            target_joint = selection[0]
+            driver_joint = selection[1] if len(selection) == 2 else None
+
+            # Get parameters from UI
+            weight = self.avg_weight_spin.value()
+            twist_axis = self.avg_twist_axis_combo.currentText().lower()
+            push_axis = self.avg_push_axis_combo.currentText().lower()
+            scale_value = self.push_scale_value_spin.value()
+
+            # Remap value parameters
+            input_min = self.remap_input_min_spin.value()
+            input_max = self.remap_input_max_spin.value()
+            output_min = self.remap_output_min_spin.value()
+            output_max = self.remap_output_max_spin.value()
+
+            # Create average and push joints using the rewritten function
+            avg_jnt, push_jnt = avg_push_joint.createAvgPushJointForFinger(
+                finger_joint=target_joint,
+                driver_joint=driver_joint,
+                weight=weight,
+                driver_axis=twist_axis,
+                distance_axis=push_axis,
+                scale_axis='x',
+                driver_value=input_max,  # Use input_max as the driver value
+                distance_value=output_max,  # Use output_max as the distance value
+                scale_value=scale_value,
+                create_push=True,
+                input_min=input_min,
+                input_max=input_max,
+                output_min=output_min,
+                output_max=output_max
+            )
+
+            driver_info = driver_joint if driver_joint else "auto-detected parent"
+            self.show_success(f"Successfully created avg + push joints:\n" +
+                            f"Target: {target_joint}\n" +
+                            f"Driver: {driver_info}\n" +
+                            f"Average: {avg_jnt}\n" +
+                            f"Push: {push_jnt}\n" +
+                            f"{twist_axis.upper()} rotation → {push_axis.upper()} push\n" +
+                            f"Remap: [{input_min}, {input_max}] → [{output_min}, {output_max}]")
+            logger.info(f"Created avg + push: {avg_jnt}, {push_jnt}")
+
+        except Exception as e:
+            self.show_error(f"Error creating avg + push joints:\n{str(e)}")
+            logger.error(f"Error in create_avg_push_from_selection: {e}")
+
+    def batch_create_all_avg_push(self):
+        """Batch create average and push joints for fingers, elbows, and knees"""
+        try:
+            # Always process both sides for batch operation
+            side = 'Both'
+
+            # Get parameters from UI
+            weight = self.avg_weight_spin.value()
+            twist_axis = self.avg_twist_axis_combo.currentText().lower()
+            push_axis = self.avg_push_axis_combo.currentText().lower()
+            scale_value = self.push_scale_value_spin.value()
+
+            # Remap value parameters
+            input_min = self.remap_input_min_spin.value()
+            input_max = self.remap_input_max_spin.value()
+            output_min = self.remap_output_min_spin.value()
+            output_max = self.remap_output_max_spin.value()
+
+            # Call the rewritten batch function - only fingers, no elbows/knees
+            created_joints = avg_push_joint.batchCreateAllAvgPush(
+                side=side,
+                fingers=None,  # Uses default: ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
+                weight=weight,
+                driver_axis=twist_axis,
+                distance_axis=push_axis,
+                scale_axis='x',
+                driver_value=input_max,
+                distance_value=output_max,
+                scale_value=scale_value,
+                input_min=input_min,
+                input_max=input_max,
+                output_min=output_min,
+                output_max=output_max,
+                include_limbs=False  # Only create for fingers, not elbows/knees
+            )
+
+            # Build success message with details
+            success_msg = f"Successfully batch created avg + push joints:\n"
+            success_msg += f"Total joints processed: {len(created_joints)}\n"
+            success_msg += f"Includes: All fingers (Base/Mid/Tip) for Both sides\n"
+            success_msg += f"Weight: {weight}\n"
+            success_msg += f"{twist_axis.upper()} rotation → {push_axis.upper()} push\n"
+            success_msg += f"Remap: [{input_min}, {input_max}] → [{output_min}, {output_max}]"
+
+            self.show_success(success_msg)
+            logger.info(f"Batch created {len(created_joints)} avg+push joint pairs")
+
+        except Exception as e:
+            self.show_error(f"Error batch creating joints:\n{str(e)}")
+            logger.error(f"Error in batch_create_all_avg_push: {e}")
+
+    def get_axis_from_combo(self, combo_text):
+        """Parse axis combo box text to tuple"""
+        axis_map = {
+            "X (1,0,0)": (1, 0, 0),
+            "Y (0,1,0)": (0, 1, 0),
+            "Z (0,0,1)": (0, 0, 1),
+            "-X (-1,0,0)": (-1, 0, 0),
+            "-Y (0,-1,0)": (0, -1, 0),
+            "-Z (0,0,-1)": (0, 0, -1)
+        }
+        return axis_map.get(combo_text, (0, 1, 0))
+
+    def setup_twist_joint_chain(self):
+        """Setup twist joint chain from selected joints"""
+        try:
+            # Get current selection
+            selection = cmds.ls(selection=True, type='joint')
+
+            # Validate selection
+            if len(selection) != 2:
+                self.show_error("Please select exactly 2 joints:\n1. Start joint\n2. End joint")
+                return
+
+            startJoint = selection[0]
+            endJoint = selection[1]
+
+            # Get parameters from UI
+            twist_count = self.twist_count_spin.value()
+            twist_axis = self.get_axis_from_combo(self.twist_axis_combo.currentText())
+            up_axis = self.get_axis_from_combo(self.up_axis_combo.currentText())
+
+            # Call the rollBone function
+            twist_joints, basis_joint = rollBone.setupTwistJointChain(
+                startJoint, endJoint, twist_count, twist_axis, up_axis
+            )
+
+            self.show_success(f"Successfully created twist joint chain:\n" +
+                            f"Start: {startJoint}\n" +
+                            f"End: {endJoint}\n" +
+                            f"Twist Joints: {len(twist_joints)}")
+            logger.info(f"Created twist joints: {twist_joints}")
+
+        except Exception as e:
+            self.show_error(f"Error setting up twist joint chain:\n{str(e)}")
+            logger.error(f"Error in setup_twist_joint_chain: {e}")
+
+    def setup_counter_twist_chain(self):
+        """Setup counter twist joint chain from selected joints"""
+        try:
+            # Get current selection
+            selection = cmds.ls(selection=True, type='joint')
+
+            # Validate selection
+            if len(selection) != 2:
+                self.show_error("Please select exactly 2 joints:\n1. Start joint\n2. End joint")
+                return
+
+            startJoint = selection[0]
+            endJoint = selection[1]
+
+            # Get parameters from UI
+            twist_count = self.twist_count_spin.value()
+            twist_axis = self.get_axis_from_combo(self.twist_axis_combo.currentText())
+            up_axis = self.get_axis_from_combo(self.up_axis_combo.currentText())
+
+            # Call the rollBone function
+            twist_joints, up_joint, basis_joint = rollBone.setupCounterTwistJointChain(
+                startJoint, endJoint, twist_count, twist_axis, up_axis
+            )
+
+            self.show_success(f"Successfully created counter twist joint chain:\n" +
+                            f"Start: {startJoint}\n" +
+                            f"End: {endJoint}\n" +
+                            f"Twist Joints: {len(twist_joints)}")
+            logger.info(f"Created counter twist joints: {twist_joints}")
+
+        except Exception as e:
+            self.show_error(f"Error setting up counter twist chain:\n{str(e)}")
+            logger.error(f"Error in setup_counter_twist_chain: {e}")
+
+    def setup_non_flip_twist(self):
+        """Setup non-flip twist chain from selected joints"""
+        try:
+            # Get current selection
+            selection = cmds.ls(selection=True, type='joint')
+
+            # Validate selection - need start, end, and up joint
+            if len(selection) != 3:
+                self.show_error("Please select exactly 3 joints:\n1. Start joint\n2. End joint\n3. Up joint")
+                return
+
+            startJoint = selection[0]
+            endJoint = selection[1]
+            upJoint = selection[2]
+
+            # Get up axis from UI
+            up_axis_tuple = self.get_axis_from_combo(self.up_axis_combo.currentText())
+            up_axis = om.MVector(up_axis_tuple)
+
+            # Call the rollBone function
+            dot_product_joint = rollBone.setupNonFlipTwistChain(
+                startJoint, endJoint, upJoint, up_axis
+            )
+
+            self.show_success(f"Successfully created non-flip twist chain:\n" +
+                            f"Start: {startJoint}\n" +
+                            f"End: {endJoint}\n" +
+                            f"Up Joint: {upJoint}")
+            logger.info(f"Created non-flip twist with dot product joint: {dot_product_joint}")
+
+        except Exception as e:
+            self.show_error(f"Error setting up non-flip twist chain:\n{str(e)}")
+            logger.error(f"Error in setup_non_flip_twist: {e}")
+
+    def add_scapula_joints(self):
+        """Add scapula joints based on selected locators"""
+        try:
+            # Get current selection
+            selection = cmds.ls(selection=True, transforms=True)
+
+            # Validate selection
+            if len(selection) != 3:
+                self.show_error("Please select exactly 3 locators:\n1. Acromion locator\n2. Scapula root locator\n3. Scapula tip locator")
+                return
+
+            # Get the three locators from selection
+            acromionLoc = selection[0]
+            scapulaLoc = selection[1]
+            scapulaTipLoc = selection[2]
+
+            # Verify they are valid objects
+            for loc in selection:
+                if not cmds.objExists(loc):
+                    self.show_error(f"Selected object does not exist: {loc}")
+                    return
+
+            # Get side from UI
+            side = self.side_combo.currentText()
+            if side == "Both":
+                side = "Left"  # Default to Left if Both is selected
+
+            # Call the helper function to add scapula joints
+            created_joints = helper_bone.addScapulaJointsToBiped(acromionLoc, scapulaLoc, scapulaTipLoc, side=side)
+
+            self.show_success(f"Successfully created scapula joints for {side} side:\n" +
+                            f"- {created_joints[0]}\n- {created_joints[1]}\n- {created_joints[2]}")
+            logger.info(f"Created scapula joints: {created_joints}")
+
+        except RuntimeError as e:
+            self.show_error(f"Failed to create scapula joints:\n{str(e)}")
+            logger.error(f"RuntimeError in add_scapula_joints: {e}")
+        except Exception as e:
+            self.show_error(f"Error creating scapula joints:\n{str(e)}")
+            logger.error(f"Error in add_scapula_joints: {e}")
+
+    def mirror_scapula_joints(self):
+        """Mirror scapula joints from one side to the other"""
+        try:
+            # Get side from UI
+            side = self.side_combo.currentText()
+            if side == "Both":
+                self.show_error("Please select either 'Left' or 'Right' as the source side for mirroring.")
+                return
+
+            # Call the mirror function
+            mirrored_joints = helper_bone.mirrorScapulaJoints(sourceSide=side)
+
+            target_side = "Right" if side == "Left" else "Left"
+            self.show_success(f"Successfully mirrored scapula joints from {side} to {target_side}:\n" +
+                            f"- {mirrored_joints[0]}\n- {mirrored_joints[1]}\n- {mirrored_joints[2]}")
+            logger.info(f"Mirrored scapula joints: {mirrored_joints}")
+
+        except RuntimeError as e:
+            self.show_error(f"Failed to mirror scapula joints:\n{str(e)}")
+            logger.error(f"RuntimeError in mirror_scapula_joints: {e}")
+        except Exception as e:
+            self.show_error(f"Error mirroring scapula joints:\n{str(e)}")
+            logger.error(f"Error in mirror_scapula_joints: {e}")
 
     def show_success(self, message):
         """Show success message"""

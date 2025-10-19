@@ -1,16 +1,16 @@
 import math
 import logging
-import maya.cmds as mc
+import maya.cmds as cmds
 import maya.api.OpenMaya as om
 
 logger = logging.getLogger(__name__)
 
 
 def calculateUpVecterPosition(startJoint, upJoint, offsetMatrix):
-    newWorldMatrix = offsetMatrix * om.MMatrix(mc.getAttr('{0}.worldMatrix'.format(startJoint)))
-    localMatrix = newWorldMatrix * om.MMatrix(mc.getAttr('{0}.parentInverseMatrix'.format(upJoint)))
+    newWorldMatrix = offsetMatrix * om.MMatrix(cmds.getAttr('{0}.worldMatrix'.format(startJoint)))
+    localMatrix = newWorldMatrix * om.MMatrix(cmds.getAttr('{0}.parentInverseMatrix'.format(upJoint)))
     translation = om.MTransformationMatrix(localMatrix).translation(4)
-    mc.setAttr('{0}.t'.format(upJoint), *translation)
+    cmds.setAttr('{0}.t'.format(upJoint), *translation)
 
 
 def projectJointChainToPlane(startJoint, endJoint, upAxis, planeNormal=None, negative=False):
@@ -25,11 +25,11 @@ def projectJointChainToPlane(startJoint, endJoint, upAxis, planeNormal=None, neg
         negative (boolean, optional): project the joint chain to the plane with obtuse angle
     """
     # rotate joint with one axis to project it to plane with given normal
-    startJointMatrix = om.MMatrix(mc.getAttr('{0}.worldMatrix'.format(startJoint)))
+    startJointMatrix = om.MMatrix(cmds.getAttr('{0}.worldMatrix'.format(startJoint)))
     # get start joint world position
     startJointWs = om.MVector([startJointMatrix.getElement(3, index) for index in range(3)])
     # get end joint world position
-    endJointMatrix = om.MMatrix(mc.getAttr('{0}.worldMatrix'.format(endJoint)))
+    endJointMatrix = om.MMatrix(cmds.getAttr('{0}.worldMatrix'.format(endJoint)))
     endJointWs = om.MVector([endJointMatrix.getElement(3, index) for index in range(3)])
     # get world space up vector for start joint:
     startJointUpVec = upAxis * startJointMatrix
@@ -84,60 +84,60 @@ def setupTwistJointChain(startJoint, endJoint=None, twistJointCount=3,
         Return all newly created joints
     """
     if not endJoint:
-        childrenJoints = mc.listRelatives(startJoint, children=True, type='joint')
+        childrenJoints = cmds.listRelatives(startJoint, children=True, type='joint')
         if childrenJoints:
             endJoint = childrenJoints[0]
 
-    if not mc.ls(endJoint):
+    if not cmds.ls(endJoint):
         raise Exception('Cannot find a valid joint chain start with {0}'.format(startJoint))
 
     # create twist joints
     twistJoints = []
     for index in range(twistJointCount):
-        mc.select(startJoint)
-        twistJoint = mc.joint()
+        cmds.select(startJoint)
+        twistJoint = cmds.joint()
         twistJointName = startJoint.lstrip('JO') + f'Twist{index}'
-        mc.rename(twistJoint, twistJointName)
+        cmds.rename(twistJoint, twistJointName)
         twistJoints.append(twistJointName)
 
-    jointChainLength = (om.MVector(mc.xform(endJoint, translation=True, q=True, ws=True)) - om.MVector(
-        mc.xform(startJoint, translation=True, q=True, ws=True))).length()
+    jointChainLength = (om.MVector(cmds.xform(endJoint, translation=True, q=True, ws=True)) - om.MVector(
+        cmds.xform(startJoint, translation=True, q=True, ws=True))).length()
     # create offset between the last twist joint and end joint: this is used for skinweights transfer
     offsetRatio = 0.02
     jointChainLength *= (1 - offsetRatio)
     distributionDistance = jointChainLength / (len(twistJoints))
     for index, twistJoint in enumerate(twistJoints):
         translation = distributionDistance * om.MVector(twistAxis) * (index + 1)
-        mc.setAttr('{0}.t'.format(twistJoint), *translation)
-        mc.setAttr('{0}.radius'.format(twistJoint), 2.0)
+        cmds.setAttr('{0}.t'.format(twistJoint), *translation)
+        cmds.setAttr('{0}.radius'.format(twistJoint), 1.0)
 
     # setup twist basis joint grp
-    mc.select(clear=True)
-    twistBasisJoint1 = mc.joint(name=startJoint.lstrip('JO') + 'TwistBasis1')
-    mc.matchTransform(twistBasisJoint1, startJoint)
-    mc.parent(twistBasisJoint1, startJoint)
-    mc.setAttr('{0}.radius'.format(twistBasisJoint1), 0.5)
-    mc.select(twistBasisJoint1)
-    twistValueJoint = mc.joint(name=startJoint.lstrip('JO') + 'TwistValue1')
-    mc.aimConstraint(endJoint, twistValueJoint, aimVector=twistAxis, upVector=upAxis, worldUpType='objectrotation',
+    cmds.select(clear=True)
+    twistBasisJoint1 = cmds.joint(name=startJoint.lstrip('JO') + 'TwistBasis1')
+    cmds.matchTransform(twistBasisJoint1, startJoint)
+    cmds.parent(twistBasisJoint1, startJoint)
+    cmds.setAttr('{0}.radius'.format(twistBasisJoint1), 0.5)
+    cmds.select(twistBasisJoint1)
+    twistValueJoint = cmds.joint(name=startJoint.lstrip('JO') + 'TwistValue1')
+    cmds.aimConstraint(endJoint, twistValueJoint, aimVector=twistAxis, upVector=upAxis, worldUpType='objectrotation',
                      worldUpObject=endJoint, worldUpVector=upAxis, maintainOffset=False)
 
     # create twist offset joint
-    mc.select(twistBasisJoint1)
-    twistOffsetJoint = mc.joint(name=startJoint.lstrip('JO') + 'BasisOffset1')
+    cmds.select(twistBasisJoint1)
+    twistOffsetJoint = cmds.joint(name=startJoint.lstrip('JO') + 'BasisOffset1')
 
     # use orient constraint to distribute the twisting along the joint chain.
-    orientConstraint = mc.orientConstraint(twistValueJoint, twistJoints[-1], maintainOffset=False, weight=1)[0]
+    orientConstraint = cmds.orientConstraint(twistValueJoint, twistJoints[-1], maintainOffset=False, weight=1)[0]
     # set orientConstraint interp Type to shortest
-    mc.setAttr('{0}.interpType'.format(orientConstraint), 2)
+    cmds.setAttr('{0}.interpType'.format(orientConstraint), 2)
     weightUnit = 1.0 / (twistJointCount)
     for index in range(twistJointCount - 1):
-        orientConstraint = mc.orientConstraint(twistOffsetJoint, twistValueJoint, twistJoints[index],
+        orientConstraint = cmds.orientConstraint(twistOffsetJoint, twistValueJoint, twistJoints[index],
                                                maintainOffset=False, weight=1)[0]
         # set orientConstraint interp Type to shortest
-        mc.setAttr('{0}.interpType'.format(orientConstraint), 2)
-        mc.setAttr('{0}.{1}W0'.format(orientConstraint, twistOffsetJoint), (1 - weightUnit * (index + 1)))
-        mc.setAttr('{0}.{1}W1'.format(orientConstraint, twistValueJoint), weightUnit * (index + 1))
+        cmds.setAttr('{0}.interpType'.format(orientConstraint), 2)
+        cmds.setAttr('{0}.{1}W0'.format(orientConstraint, twistOffsetJoint), (1 - weightUnit * (index + 1)))
+        cmds.setAttr('{0}.{1}W1'.format(orientConstraint, twistValueJoint), weightUnit * (index + 1))
 
     return twistJoints, twistBasisJoint1
 
@@ -163,24 +163,24 @@ def setupCounterTwistJointChain(startJoint, endJoint=None, twistJointCount=3,
         Return all the newly created joints
     """
     if not endJoint:
-        childrenJoints = mc.listRelatives(startJoint, children=True, type='joint')
+        childrenJoints = cmds.listRelatives(startJoint, children=True, type='joint')
         if childrenJoints:
             endJoint = childrenJoints[0]
 
-    if not mc.ls(endJoint):
+    if not cmds.ls(endJoint):
         raise Exception('Cannot find a valid joint chain start with {0}'.format(startJoint))
 
     # create twist joint setup
     twistJoints = []
     for index in range(twistJointCount):
-        mc.select(startJoint)
-        twistJoint = mc.joint()
+        cmds.select(startJoint)
+        twistJoint = cmds.joint()
         twistJointName = startJoint.lstrip('JO') + 'Twist{0}'.format(index)
-        mc.rename(twistJoint, twistJointName)
+        cmds.rename(twistJoint, twistJointName)
         twistJoints.append(twistJointName)
 
-    jointChainLength = (om.MVector(mc.xform(endJoint, translation=True, q=True, ws=True)) - om.MVector(
-        mc.xform(startJoint, translation=True, q=True, ws=True))).length()
+    jointChainLength = (om.MVector(cmds.xform(endJoint, translation=True, q=True, ws=True)) - om.MVector(
+        cmds.xform(startJoint, translation=True, q=True, ws=True))).length()
     # create offset between the first twist joint and start joint: this is used for skinweights transfer
     offsetRatio = 0.02
     offset = jointChainLength * offsetRatio
@@ -188,60 +188,62 @@ def setupCounterTwistJointChain(startJoint, endJoint=None, twistJointCount=3,
 
     for index, twistJoint in enumerate(twistJoints):
         translation = distributionDistance * om.MVector(twistAxis) * index + offset * om.MVector(twistAxis)
-        mc.setAttr('{0}.t'.format(twistJoint), *translation)
-        mc.setAttr('{0}.radius'.format(twistJoint), 2.0)
+        cmds.setAttr('{0}.t'.format(twistJoint), *translation)
+        cmds.setAttr('{0}.radius'.format(twistJoint), 1.0)
 
     # setup counterTwist joint with aim constraint
-    mc.select(clear=True)
+    cmds.select(clear=True)
     twistBasisJointName = startJoint.lstrip('JO') + 'TwistBasis1'
-    twistBasisJoint = mc.joint(name=twistBasisJointName)
-    mc.setAttr('{0}.radius'.format(twistBasisJointName), 0.5)
-    mc.parent(twistBasisJoint, startJoint)
-    mc.matchTransform(twistBasisJoint, startJoint)
+    twistBasisJoint = cmds.joint(name=twistBasisJointName)
+    cmds.setAttr('{0}.radius'.format(twistBasisJointName), 0.5)
+    cmds.parent(twistBasisJoint, startJoint)
+    cmds.matchTransform(twistBasisJoint, startJoint)
     # create up object to lock the rotation of the first twist joint
-    mc.select(cl=True)
-    upJoint = mc.joint(name=startJoint.lstrip('JO') + 'TwistUp1')
-    mc.setAttr('{0}.radius'.format(upJoint), 1)
-    mc.matchTransform(upJoint, startJoint)
-    # mc.delete(mc.parentConstraint(startJoint, upJoint, mo=False, weight=True))
+    cmds.select(cl=True)
+    upJoint = cmds.joint(name=startJoint.lstrip('JO') + 'TwistUp1')
+    cmds.setAttr('{0}.radius'.format(upJoint), 1)
+    cmds.matchTransform(upJoint, startJoint)
+    # cmds.delete(cmds.parentConstraint(startJoint, upJoint, mo=False, weight=True))
     # move up the locator along the up axis by 0.05 unit at local space
-    mc.parent(upJoint, startJoint)
-    mc.setAttr('{0}.translate'.format(upJoint), *(om.MVector(upAxis) * 0.05))
+    cmds.parent(upJoint, startJoint)
+    print(om.MVector(upAxis))
+    cmds.setAttr('{0}.translate'.format(upJoint), *(om.MVector(upAxis) * 1))
+    # cmds.setAttr('{0}.translate'.format(upJoint), *(om.MVector(1, 0, 0) * 1))
 
     # parent upJoint to startJoint's parent node if exists
-    startJointParent = mc.listRelatives(startJoint, parent=True, type='joint')
+    startJointParent = cmds.listRelatives(startJoint, parent=True, type='joint')
 
     if not startJointParent:
         raise Exception('Fialed to find the parent joint for startJoint: {0}'.format(startJoint))
 
     startJointParent = startJointParent[0]
-    mc.parent(upJoint, startJointParent)
+    cmds.parent(upJoint, startJointParent)
 
-    mc.aimConstraint(endJoint, twistBasisJoint, aimVector=twistAxis, upVector=upAxis,
+    cmds.aimConstraint(endJoint, twistBasisJoint, aimVector=twistAxis, upVector=upAxis,
                      worldUpType='object', worldUpObject=upJoint)
     # create joint used to store the actual twist value: This is from Axel's prototype.
-    mc.select(twistBasisJoint)
-    twistValueJoint = mc.joint(name=startJoint.lstrip('JO') + 'TwistValue1')
-    mc.aimConstraint(endJoint, twistValueJoint, aimVector=twistAxis, upVector=upAxis,
+    cmds.select(twistBasisJoint)
+    twistValueJoint = cmds.joint(name=startJoint.lstrip('JO') + 'TwistValue1')
+    cmds.aimConstraint(endJoint, twistValueJoint, aimVector=twistAxis, upVector=upAxis,
                      worldUpType='objectrotation', worldUpObject=startJoint, worldUpVector=upAxis)
     # create twist offset joint
-    mc.select(twistBasisJoint)
-    twistOffsetJoint = mc.joint(name=startJoint.lstrip('JO') + 'BasisOffset1')
+    cmds.select(twistBasisJoint)
+    twistOffsetJoint = cmds.joint(name=startJoint.lstrip('JO') + 'BasisOffset1')
 
     # use orient constraint to distribute the twisting along the joint chain.
-    orientConstraint = mc.orientConstraint(twistOffsetJoint, twistValueJoint, twistJoints[0], mo=False, weight=1)[0]
+    orientConstraint = cmds.orientConstraint(twistOffsetJoint, twistValueJoint, twistJoints[0], mo=False, weight=1)[0]
     # set orientConstraint interp Type to shortest
-    mc.setAttr('{0}.interpType'.format(orientConstraint), 2)
-    mc.setAttr('{0}.{1}W0'.format(orientConstraint, twistOffsetJoint), 0.9)
-    mc.setAttr('{0}.{1}W1'.format(orientConstraint, twistValueJoint), 0.1)
+    cmds.setAttr('{0}.interpType'.format(orientConstraint), 2)
+    cmds.setAttr('{0}.{1}W0'.format(orientConstraint, twistOffsetJoint), 0.9)
+    cmds.setAttr('{0}.{1}W1'.format(orientConstraint, twistValueJoint), 0.1)
     weightUnit = 1.0 / (twistJointCount)
     for index in range(1, twistJointCount):
-        orientConstraint = mc.orientConstraint(twistOffsetJoint, twistValueJoint,
+        orientConstraint = cmds.orientConstraint(twistOffsetJoint, twistValueJoint,
                                                twistJoints[index], mo=False, weight=1)[0]
         # set orientConstraint interp Type to shortest
-        mc.setAttr('{0}.interpType'.format(orientConstraint), 2)
-        mc.setAttr('{0}.{1}W0'.format(orientConstraint, twistOffsetJoint), (1 - weightUnit * index))
-        mc.setAttr('{0}.{1}W1'.format(orientConstraint, twistValueJoint), weightUnit * index)
+        cmds.setAttr('{0}.interpType'.format(orientConstraint), 2)
+        cmds.setAttr('{0}.{1}W0'.format(orientConstraint, twistOffsetJoint), (1 - weightUnit * index))
+        cmds.setAttr('{0}.{1}W1'.format(orientConstraint, twistValueJoint), weightUnit * index)
 
     # return all the dependencies
     return twistJoints, upJoint, twistBasisJoint
@@ -253,7 +255,7 @@ def setupNonFlipTwistChain(startJoint, endJoint, upJoint, upAxis):
     This will usually indicates Yaw or Pitch for the joint chain rotation
 
     Args:
-        startJoint (str): parent joint chain name
+        startJoint (str): parent joint chain name, JOShoulder
         endJoint (str): child joint chain name
         upJoint (str): up joint chian name
         upAxis (MVector): up axis of the joint chain
@@ -264,49 +266,51 @@ def setupNonFlipTwistChain(startJoint, endJoint, upJoint, upAxis):
     """
     # use dot product outputs to drive upJoint positoin
     # create a marker to detect the joint chain rotation
-    startJointParent = mc.listRelatives(startJoint, parent=True, type='joint')
+    startJointParent = cmds.listRelatives(startJoint, parent=True, type='joint')
     if not startJointParent:
         logger.error('Failed to find the parent for angle marker.')
         return
-
+    # first parent joint to select: clavicle
     startJointParent = startJointParent[0]
-    dotProductJoint = mc.joint(name=startJoint.lstrip('JO') + 'Twist_{0}'.format(startJointParent.lstrip('JO')))
-    mc.parent(dotProductJoint, startJoint)
-    mc.setAttr('{0}.t'.format(dotProductJoint), 0, 0, 0)
-    offsetVec = -0.1 * upAxis
-    mc.move(offsetVec.x, offsetVec.y, offsetVec.z, dotProductJoint, r=True, os=True)
-    mc.parent(dotProductJoint, startJointParent)
+    cmds.select(clear=True)
+    dotProductJoint = cmds.joint(name=startJoint.lstrip('JO') + 'Twist_{0}'.format(startJointParent.lstrip('JO'))) #LeftShoulder1Twist_LeftClavicle1
+    cmds.matchTransform(dotProductJoint, startJoint)
+    cmds.parent(dotProductJoint, startJoint)
+    cmds.setAttr('{0}.t'.format(dotProductJoint), 0, 0, 0)
+    offsetVec = -1 * om.MVector(upAxis)
+    cmds.move(offsetVec.x, offsetVec.y, offsetVec.z, dotProductJoint, r=True, os=True)
+    cmds.parent(dotProductJoint, startJointParent)
 
     """DEBUG: Calculate default arm rotation in world space. This is for debug only"""
-    # orientationLocator = mc.spaceLocator(name=startJoint.lstrip('JO') + 'Orientation')[0]
-    # mc.delete(mc.parentConstraint(startJoint, orientationLocator, mo=False, weight=1))
+    # orientationLocator = cmds.spaceLocator(name=startJoint.lstrip('JO') + 'Orientation')[0]
+    # cmds.delete(cmds.parentConstraint(startJoint, orientationLocator, mo=False, weight=1))
 
-    dotProductNode = mc.shadingNode('vectorProduct', asUtility=True, name=startJoint.lstrip('JO') + '_DPN')
-    multMatrixNode = mc.shadingNode('multMatrix', asUtility=True, name=startJoint.lstrip('JO') + '_MMN')
-    decomposeMatrixNode = mc.shadingNode('decomposeMatrix', asUtility=True, name=startJoint.lstrip('JO') + '_DMN')
-    mc.connectAttr('{0}.worldMatrix'.format(dotProductJoint), '{0}.matrixIn[0]'.format(multMatrixNode))
-    mc.connectAttr('{0}.worldInverseMatrix'.format(startJoint), '{0}.matrixIn[1]'.format(multMatrixNode))
-    mc.connectAttr('{0}.matrixSum'.format(multMatrixNode), '{0}.inputMatrix'.format(decomposeMatrixNode))
+    dotProductNode = cmds.shadingNode('vectorProduct', asUtility=True, name=startJoint.lstrip('JO') + '_DPN')
+    multMatrixNode = cmds.shadingNode('multMatrix', asUtility=True, name=startJoint.lstrip('JO') + '_MMN')
+    decomposeMatrixNode = cmds.shadingNode('decomposeMatrix', asUtility=True, name=startJoint.lstrip('JO') + '_DMN')
+    cmds.connectAttr('{0}.worldMatrix'.format(dotProductJoint), '{0}.matrixIn[0]'.format(multMatrixNode))
+    cmds.connectAttr('{0}.worldInverseMatrix'.format(startJoint), '{0}.matrixIn[1]'.format(multMatrixNode))
+    cmds.connectAttr('{0}.matrixSum'.format(multMatrixNode), '{0}.inputMatrix'.format(decomposeMatrixNode))
 
-    mc.connectAttr('{0}.outputTranslate'.format(decomposeMatrixNode), '{0}.input1'.format(dotProductNode))
-    mc.connectAttr('{0}.t'.format(endJoint), '{0}.input2'.format(dotProductNode))
+    cmds.connectAttr('{0}.outputTranslate'.format(decomposeMatrixNode), '{0}.input1'.format(dotProductNode))
+    cmds.connectAttr('{0}.t'.format(endJoint), '{0}.input2'.format(dotProductNode))
 
-    mc.setAttr('{0}.normalizeOutput'.format(dotProductNode), 1.0)
+    cmds.setAttr('{0}.normalizeOutput'.format(dotProductNode), 1.0)
 
-    upJointMatrix = om.MMatrix(mc.getAttr('{0}.worldMatrix'.format(upJoint)))
-    startJointMatrix = om.MMatrix(mc.getAttr('{0}.worldMatrix'.format(startJoint)))
+    upJointMatrix = om.MMatrix(cmds.getAttr('{0}.worldMatrix'.format(upJoint)))
+    startJointMatrix = om.MMatrix(cmds.getAttr('{0}.worldMatrix'.format(startJoint)))
     offsetMatrix = upJointMatrix * startJointMatrix.inverse()
 
     def setDrivenKeys():
-        mc.setDrivenKeyframe(upJoint + '.' + 'translateX', cd=dotProductNode + '.' + 'outputX',
+        cmds.setDrivenKeyframe(upJoint + '.' + 'translateX', cd=dotProductNode + '.' + 'outputX',
                              inTangentType='linear', outTangentType='linear')
-        mc.setDrivenKeyframe(upJoint + '.' + 'translateY', cd=dotProductNode + '.' + 'outputX',
+        cmds.setDrivenKeyframe(upJoint + '.' + 'translateY', cd=dotProductNode + '.' + 'outputX',
                              inTangentType='linear', outTangentType='linear')
-        mc.setDrivenKeyframe(upJoint + '.' + 'translateZ', cd=dotProductNode + '.' + 'outputX',
+        cmds.setDrivenKeyframe(upJoint + '.' + 'translateZ', cd=dotProductNode + '.' + 'outputX',
                              inTangentType='linear', outTangentType='linear')
 
     # create a temp dagpose
-    mc.dagPose(startJoint, save=True, name='tempDagPose1')
+    cmds.dagPose(startJoint, save=True, name='tempDagPose1')
     setDrivenKeys()
 
     # rotate the joint chain to the plane
@@ -315,15 +319,15 @@ def setupNonFlipTwistChain(startJoint, endJoint, upJoint, upAxis):
     calculateUpVecterPosition(startJoint, upJoint, offsetMatrix)
     setDrivenKeys()
 
-    mc.dagPose('tempDagPose1', restore=True)
+    cmds.dagPose('tempDagPose1', restore=True)
 
     projectJointChainToPlane(startJoint, endJoint, upAxis, negative=True)
     # calculate upJoint position
     calculateUpVecterPosition(startJoint, upJoint, offsetMatrix)
     setDrivenKeys()
 
-    mc.dagPose('tempDagPose1', restore=True)
+    cmds.dagPose('tempDagPose1', restore=True)
 
-    mc.delete('tempDagPose1')
+    cmds.delete('tempDagPose1')
 
     return dotProductJoint

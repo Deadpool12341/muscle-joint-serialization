@@ -46,10 +46,14 @@ def check_pyside2():
 def reload_modules():
     """Reload all muscle system modules for development"""
     modules_to_reload = [
-        'muscle_template',
-        'muscle_bone',
-        'config',
-        'muscle_ui'
+        'jointBasedMuscle_template.config',
+        'jointBasedMuscle_template.utils',
+        'jointBasedMuscle_template.helper_bone',
+        'jointBasedMuscle_template.avg_push_joint',
+        'jointBasedMuscle_template.rollBone.rollBone',
+        'jointBasedMuscle_template.muscle_bone',
+        'jointBasedMuscle_template.muscle_template',
+        'jointBasedMuscle_template.muscle_ui'
     ]
 
     reloaded = []
@@ -58,11 +62,12 @@ def reload_modules():
             if module_name in sys.modules:
                 importlib.reload(sys.modules[module_name])
                 reloaded.append(module_name)
+                print(f"  - Reloaded: {module_name}")
         except Exception as e:
             print(f"Warning: Could not reload {module_name}: {e}")
 
     if reloaded:
-        print(f"✓ Reloaded modules: {', '.join(reloaded)}")
+        print(f"✓ Successfully reloaded {len(reloaded)} modules")
 
     return reloaded
 
